@@ -14,7 +14,7 @@ pub struct LoginRequest {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct LoginResponse {
-    pub token: String,
+    pub access_token: String,
     pub refresh_token: String,
     pub exp: usize,
     pub iat: usize,
@@ -89,8 +89,8 @@ pub async fn refresh_token(headers: HeaderMap) -> impl IntoResponse {
     };
 
     match jwt::verify_refresh_token(token).await {
-        Ok(claims) => match jwt::create_token(claims.sub, claims.tenant_id).await {
-            Ok(resp) => (StatusCode::OK, Json(R::ok_data(resp))),
+        Ok(claims) => match jwt::get_token(&claims.sub, &claims.tenant_id, 1, "access").await {
+            Ok((access_token,exp, _)) => (StatusCode::OK, Json(R::ok_data(LoginResponse { access_token, refresh_token: token.to_string(), exp, iat: claims.iat}))),
             Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(R::<LoginResponse>::error(500, e.to_string()))),
         },
         Err(_) => unauthorized(),

@@ -3,28 +3,29 @@ use jsonwebtoken::{encode, decode, Algorithm, EncodingKey, DecodingKey, Header, 
 use crate::{errors::{AuthixError, AuthixResult}, login::LoginResponse, utils::Claims};
 
 pub async fn create_token(sub: String, tenant_id: String) -> AuthixResult<LoginResponse> {
+    let exp = 1000 * 60 * 5; // 5 min
+    let refresh_exp = 1000 * 60 * 60 * 24 * 7; // 7 day
+    let (access_token,_,now) = get_token(&sub, &tenant_id, exp, "access").await?;
+    let (refresh_token,_,_) = get_token(&sub, &tenant_id, refresh_exp, "refresh").await?;
+    Ok(LoginResponse { access_token, refresh_token, exp, iat: now })
+}
+
+pub async fn get_token(sub: &str, tenant_id: &str, exp: usize, token_type: &str) -> AuthixResult<(String,usize,usize)> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or(Duration::from_millis(0))
         .as_millis() as usize;
-    let exp = now + 1000 * 60 * 5; // 5 min
-    let refresh_exp = now + 1000 * 60 * 60 * 24 * 7; // 7 day
-    let claims = Claims { sub: sub.clone(), tenant_id: tenant_id.clone(), exp, token_type: "access".to_string() };
-    let refresh_claims = Claims { sub, tenant_id, exp: refresh_exp, token_type: "refresh".to_string() };
     let jwt_secret = env::var("JWT_DECODING_KEY")?;
+    let claims = Claims { sub: sub.to_string(), tenant_id: tenant_id.to_string(), exp, iat: now + exp, token_type: token_type.to_string() };
     let token = encode(
         &Header::new(Algorithm::HS256),
         &claims,
         &EncodingKey::from_secret(jwt_secret.as_bytes()),
     )?;
-    let refresh_token = encode(
-        &Header::new(Algorithm::HS256),
-        &refresh_claims,
-        &EncodingKey::from_secret(jwt_secret.as_bytes()),
-    )?;
-    Ok(LoginResponse { token, refresh_token, exp, iat: now })
+    Ok((token,exp,now))
 }
 
+#[allow(dead_code)]
 pub async fn verify_access_token(token: &str) -> AuthixResult<Claims> {
     let jwt_secret = env::var("JWT_DECODING_KEY")?;
     let data = decode::<Claims>(

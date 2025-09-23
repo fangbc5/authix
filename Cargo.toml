@@ -34,3 +34,6 @@ config = "0.15.16"
 
 # prometheus
 prometheus = "0.14.0"
+
+# uuid
+uuid = { version = "1.18.1", features = ["v4"] }
