@@ -13,6 +13,12 @@ pub enum AuthixError {
 
     #[error("Invalid credentials for {0}")]
     InvalidCredentials(String),
+
+    #[error("Redis error for {0}")]
+    RedisError(#[from] redis::RedisError),
+
+    #[error("Redis DeadPool error for {0}")]
+    DeadPoolError(#[from] deadpool_redis::redis::RedisError)
 }
 
 pub type AuthixResult<T> = Result<T, AuthixError>;

@@ -6,6 +6,9 @@ use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
+use crate::cache::get_online_user_count;
+use crate::common::PageQuery;
+use crate::common::PageResult;
 use crate::utils::database::DB_POOL;
 use axum::http::StatusCode;
 use axum::Json;
@@ -13,6 +16,7 @@ use axum_extra::extract::TypedHeader;
 use crate::common::UidHeader;
 use crate::common::R;
 use axum::Extension;
+use axum::extract::Query;
 
 pub const USER_TABLE_NAME: &str = "i18n_users";
 
@@ -39,6 +43,7 @@ pub struct ProfileInfo {
 #[async_trait]
 pub trait UserProvider: Send + Sync {
     async fn get_user_profile(&self, id: u64) -> Result<ProfileInfo, String>;
+    async fn get_user_profiles(&self, ids: Vec<u64>) -> Result<Vec<ProfileInfo>, String>;
     async fn create_user(&self, user: User) -> Result<User, String>;
     async fn delete_user(&self, id: u64) -> Result<(), String>;
     async fn get_user_by_username(&self, username: String) -> Result<User, String>;
@@ -59,6 +64,28 @@ impl UserProvider for UserService {
             .await
             .map_err(|e| format!("Database error: {}", e))?;
         Ok(user)
+    }
+
+    async fn get_user_profiles(&self, ids: Vec<u64>) -> Result<Vec<ProfileInfo>, String> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let pool = &*DB_POOL;
+        // 动态占位符
+        let placeholders = std::iter::repeat("?").take(ids.len()).collect::<Vec<_>>().join(", ");
+        let sql = format!(
+            "SELECT username, nickname, avatar, gender, birthday, last_login FROM {} WHERE id IN ({})",
+            USER_TABLE_NAME, placeholders
+        );
+        let mut q = sqlx::query_as::<_, ProfileInfo>(&sql);
+        for id in ids {
+            q = q.bind(id);
+        }
+        let list = q
+            .fetch_all(pool)
+            .await
+            .map_err(|e| format!("Database error: {}", e))?;
+        Ok(list)
     }
 
     async fn create_user(&self, user: User) -> Result<User, String> {
@@ -136,5 +163,32 @@ pub async fn user_profile(
     match user_provider.get_user_profile(id).await {
         Ok(user) => (StatusCode::OK, Json(R::ok_data(user))),
         Err(e) => (StatusCode::NOT_FOUND, Json(R::<ProfileInfo>::error(404, e))),
+    }
+}
+
+pub async fn online_count() -> impl IntoResponse {
+    match get_online_user_count().await {
+        Ok(count) => (StatusCode::OK, Json(R::ok_data(count))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(R::<u64>::error(500, e))),
+    }
+}
+
+pub async fn online_users(
+    Extension(user_provider): Extension<Arc<dyn UserProvider>>,
+    Query(q): Query<PageQuery>,
+) -> impl IntoResponse {
+    let page = q.page.unwrap_or(1).max(1);
+    let page_size = q.page_size.unwrap_or(20).clamp(1, 200);
+    match crate::cache::get_online_user_ids_paginated(page, page_size).await {
+        Ok(page_result) => {
+            match user_provider.get_user_profiles(page_result.records.clone()).await {
+                Ok(profiles) => {
+                    let data = PageResult { total: page_result.total, records: profiles };
+                    (StatusCode::OK, Json(R::ok_data(data)))
+                }
+                Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(R::<PageResult<ProfileInfo>>::error(500, e)))
+            }
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(R::<PageResult<ProfileInfo>>::error(500, e))),
     }
 }

@@ -6,7 +6,7 @@ use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 use crate::login::{login_handler, logout_handler, refresh_token, LoginProvider, LoginService};
-use crate::user::{user_profile, UserService, UserProvider};
+use crate::user::{online_count, user_profile, online_users, UserService, UserProvider};
 use crate::utils::uuid::get_token;
 
 mod common;
@@ -15,6 +15,7 @@ mod provider;
 mod user;
 mod utils;
 mod errors;
+mod cache;
 
 #[tokio::main]
 async fn main() {
@@ -46,9 +47,11 @@ pub async fn init_app() -> Router {
         .route("/login", post(login_handler))
         .route("/logout", get(logout_handler));
     let token_router = Router::new()
-        .route("/token/refresh", get(refresh_token))
-        .route("/token/get", get(get_token));
+        .route("/refresh", get(refresh_token))
+        .route("/get", get(get_token));
     let user_router =  Router::new()
+        .route("/online_count", get(online_count))
+        .route("/online_users", get(online_users))
         .route("/profile", get(user_profile));
 
     Router::new()

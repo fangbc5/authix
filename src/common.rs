@@ -1,5 +1,5 @@
 use headers::Header;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use axum::http::{HeaderName, HeaderValue};
 
 #[derive(Debug, Serialize)]
@@ -9,6 +9,19 @@ pub struct R<T> {
     pub message: Option<String>,
     pub data: Option<T>
 }
+
+#[derive(Debug, Deserialize)]
+pub struct PageQuery {
+    pub page: Option<isize>,
+    pub page_size: Option<isize>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PageResult<T> {
+    pub total: u64,
+    pub records: Vec<T>,
+}
+
 
 impl<T> R<T> {
     pub fn ok() -> Self {

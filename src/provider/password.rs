@@ -2,8 +2,9 @@ use std::sync::Arc;
 
 use axum::async_trait;
 use argon2::{Argon2, password_hash::{PasswordHash, PasswordVerifier}};
+use deadpool_redis::redis::AsyncCommands;
 
-use crate::{common::R, errors::{AuthixError, AuthixResult}, login::{LoginProvider, LoginRequest, LoginResponse}, user::UserProvider, utils::jwt};
+use crate::{common::R, errors::{AuthixError, AuthixResult}, login::{LoginProvider, LoginRequest, LoginResponse}, user::UserProvider, utils::{jwt, redis::REDIS_POOL}};
 
 pub struct PasswordLoginProvider;
 

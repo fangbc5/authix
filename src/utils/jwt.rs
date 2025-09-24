@@ -1,12 +1,13 @@
 use std::{env, time::{Duration, SystemTime, UNIX_EPOCH}};
 use jsonwebtoken::{encode, decode, Algorithm, EncodingKey, DecodingKey, Header, Validation};
-use crate::{errors::{AuthixError, AuthixResult}, login::LoginResponse, utils::Claims};
+use crate::{cache, errors::{AuthixError, AuthixResult}, login::LoginResponse, utils::Claims};
+
+pub const ACCESS_TOKEN_EXP: usize = 1000 * 60 * 5;
+pub const REFRESH_TOKEN_EXP: usize = 1000 * 60 * 60 * 24 * 7;
 
 pub async fn create_token(sub: String, tenant_id: String) -> AuthixResult<LoginResponse> {
-    let exp = 1000 * 60 * 5; // 5 min
-    let refresh_exp = 1000 * 60 * 60 * 24 * 7; // 7 day
-    let (access_token,access_exp,iat) = get_token(&sub, &tenant_id, exp, "access").await?;
-    let (refresh_token,_,_) = get_token(&sub, &tenant_id, refresh_exp, "refresh").await?;
+    let (access_token,access_exp,iat) = get_token(&sub, &tenant_id, ACCESS_TOKEN_EXP, "access").await?;
+    let (refresh_token,_,_) = get_token(&sub, &tenant_id, REFRESH_TOKEN_EXP, "refresh").await?;
     Ok(LoginResponse { access_token, refresh_token, exp: access_exp, iat })
 }
 
@@ -22,6 +23,14 @@ pub async fn get_token(sub: &str, tenant_id: &str, exp: usize, token_type: &str)
         &claims,
         &EncodingKey::from_secret(jwt_secret.as_bytes()),
     )?;
+    if "access" == token_type {
+        let uid: u64 = sub
+            .parse()
+            .map_err(|e| AuthixError::InvalidCredentials(format!("invalid user id: {}", e)))?;
+        cache::save_user_access_token(uid, &token, ACCESS_TOKEN_EXP)
+            .await
+            .map_err(|e| AuthixError::InvalidCredentials(format!("cache save error: {}", e)))?;
+    }
     Ok((token,claims.exp,claims.iat))
 }
 

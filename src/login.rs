@@ -103,5 +103,12 @@ pub async fn refresh_token(headers: HeaderMap) -> impl IntoResponse {
 }
 
 pub async fn logout_handler(TypedHeader(uid): TypedHeader<UidHeader>) -> impl IntoResponse {
-    Json(R::<String>::ok())
+    let id: u64 = match uid.0.parse() {
+        Ok(v) => v,
+        Err(_) => return (StatusCode::BAD_REQUEST, Json(R::<String>::error(400, "invalid uid".into()))),
+    };
+    match crate::cache::delete_user_access_token(id).await {
+        Ok(_) => (StatusCode::OK, Json(R::<String>::ok())),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(R::<String>::error(500, e))),
+    }
 }
