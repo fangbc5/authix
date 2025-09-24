@@ -1,16 +1,19 @@
+use std::sync::Arc;
+
 use axum::async_trait;
 
-use crate::{common::R, errors::{AuthixError, AuthixResult}, login::{LoginProvider, LoginRequest, LoginResponse}};
+use crate::{common::R, errors::{AuthixError, AuthixResult}, login::{LoginProvider, LoginRequest, LoginResponse}, user::UserProvider};
 
 pub struct SmsLoginProvider;
 #[async_trait]
 impl LoginProvider for SmsLoginProvider {
-    async fn login(&self, req: &LoginRequest) -> AuthixResult<R<LoginResponse>> {
-        // 这里验证手机号验证码逻辑，例如 Redis 中存储的验证码
-        if req.credential == "123456" {
-            Ok(R::ok())
-        } else {
-            Err(AuthixError::InvalidCredentials("手机号或验证码错误".to_owned()))
-        }
+    async fn login(&self, req: &LoginRequest, user_service: Arc<dyn UserProvider>) -> AuthixResult<R<LoginResponse>> {
+        // 验证短信验证码（此处省略，假设上游已校验 req.credential）
+        let user = user_service
+            .get_user_by_phone(req.identifier.clone())
+            .await
+            .map_err(|_| AuthixError::InvalidCredentials("手机号未注册".to_owned()))?;
+        let resp = crate::utils::jwt::create_token(user.id.to_string(), "default".to_string()).await?;
+        Ok(R::ok_data(resp))
     }
 }

@@ -5,9 +5,9 @@ use crate::{errors::{AuthixError, AuthixResult}, login::LoginResponse, utils::Cl
 pub async fn create_token(sub: String, tenant_id: String) -> AuthixResult<LoginResponse> {
     let exp = 1000 * 60 * 5; // 5 min
     let refresh_exp = 1000 * 60 * 60 * 24 * 7; // 7 day
-    let (access_token,_,now) = get_token(&sub, &tenant_id, exp, "access").await?;
+    let (access_token,access_exp,iat) = get_token(&sub, &tenant_id, exp, "access").await?;
     let (refresh_token,_,_) = get_token(&sub, &tenant_id, refresh_exp, "refresh").await?;
-    Ok(LoginResponse { access_token, refresh_token, exp, iat: now })
+    Ok(LoginResponse { access_token, refresh_token, exp: access_exp, iat })
 }
 
 pub async fn get_token(sub: &str, tenant_id: &str, exp: usize, token_type: &str) -> AuthixResult<(String,usize,usize)> {
@@ -16,13 +16,13 @@ pub async fn get_token(sub: &str, tenant_id: &str, exp: usize, token_type: &str)
         .unwrap_or(Duration::from_millis(0))
         .as_millis() as usize;
     let jwt_secret = env::var("JWT_DECODING_KEY")?;
-    let claims = Claims { sub: sub.to_string(), tenant_id: tenant_id.to_string(), exp, iat: now + exp, token_type: token_type.to_string() };
+    let claims = Claims { sub: sub.to_string(), tenant_id: tenant_id.to_string(), exp: now + exp, iat: now, token_type: token_type.to_string() };
     let token = encode(
         &Header::new(Algorithm::HS256),
         &claims,
         &EncodingKey::from_secret(jwt_secret.as_bytes()),
     )?;
-    Ok((token,exp,now))
+    Ok((token,claims.exp,claims.iat))
 }
 
 #[allow(dead_code)]

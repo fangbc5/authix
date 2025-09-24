@@ -1,67 +1,140 @@
+use std::sync::Arc;
+
 use axum::{async_trait, response::IntoResponse};
-use serde::Deserialize;
+use chrono::NaiveDate;
+use chrono::NaiveDateTime;
+use serde::{Deserialize, Serialize};
+use sqlx::FromRow;
 
+use crate::utils::database::DB_POOL;
+use axum::http::StatusCode;
+use axum::Json;
+use axum_extra::extract::TypedHeader;
+use crate::common::UidHeader;
+use crate::common::R;
+use axum::Extension;
 
-#[derive(Debug, Clone, Deserialize)]
+pub const USER_TABLE_NAME: &str = "i18n_users";
+
+#[derive(Debug, Clone, Deserialize, Serialize, FromRow)]
 pub struct User {
-    pub id: i32,
-    pub username: String,
-    pub phone: String,
-    pub email: String,
+    pub id: u64,
+    pub tenant_id: u64,
+    pub username: Option<String>,
+    pub phone: Option<String>,
+    pub email: Option<String>,
     pub password: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, FromRow)]
+pub struct ProfileInfo {
+    pub username: Option<String>,
+    pub nickname: Option<String>,
+    pub avatar: Option<String>,
+    pub gender: Option<u8>,
+    pub birthday: Option<NaiveDate>,
+    pub last_login: Option<NaiveDateTime>,
 }
 
 #[async_trait]
 pub trait UserProvider: Send + Sync {
-    #[allow(dead_code)]
-    async fn get_user_by_id(&self, id: i32) -> Result<User, String>;
-    #[allow(dead_code)]
+    async fn get_user_profile(&self, id: u64) -> Result<ProfileInfo, String>;
     async fn create_user(&self, user: User) -> Result<User, String>;
-    #[allow(dead_code)]
-    async fn delete_user(&self, id: i32) -> Result<(), String>;
-    #[allow(dead_code)]
+    async fn delete_user(&self, id: u64) -> Result<(), String>;
     async fn get_user_by_username(&self, username: String) -> Result<User, String>;
-    #[allow(dead_code)]
     async fn get_user_by_phone(&self, phone: String) -> Result<User, String>;
-    #[allow(dead_code)]
     async fn get_user_by_email(&self, email: String) -> Result<User, String>;
 }
 
 #[derive(Default)]
 pub struct UserService;
 
+#[async_trait]
 impl UserProvider for UserService {
-    #[allow(dead_code)]
-    fn get_user_by_id<'life0,'async_trait>(&'life0 self,id:i32) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = Result<User,String> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
-        todo!()
+    async fn get_user_profile(&self, id: u64) -> Result<ProfileInfo, String> {
+        let pool = &*DB_POOL;
+        let user = sqlx::query_as::<_, ProfileInfo>(&format!("SELECT username, nickname, avatar, gender, birthday, last_login FROM {} WHERE id = ?", USER_TABLE_NAME))
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| format!("Database error: {}", e))?;
+        Ok(user)
     }
 
-    #[allow(dead_code)]
-    fn create_user<'life0,'async_trait>(&'life0 self,user:User) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = Result<User,String> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
-        todo!()
+    async fn create_user(&self, user: User) -> Result<User, String> {
+        let pool = &*DB_POOL;
+        let result = sqlx::query(&format!("INSERT INTO {} (tenant_id, username, phone, email, password) VALUES (?, ?, ?, ?, ?)", USER_TABLE_NAME))
+            .bind(&user.tenant_id)
+            .bind(&user.username)
+            .bind(&user.phone)
+            .bind(&user.email)
+            .bind(&user.password)
+            .execute(pool)
+            .await
+            .map_err(|e| format!("Database error: {}", e))?;
+        
+        let new_user = User {
+            id: result.last_insert_id(),
+            tenant_id: user.tenant_id,
+            username: user.username,
+            phone: user.phone,
+            email: user.email,
+            password: user.password,
+        };
+        Ok(new_user)
     }
 
-    #[allow(dead_code)]
-    fn delete_user<'life0,'async_trait>(&'life0 self,id:i32) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = Result<(),String> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
-        todo!()
+    async fn delete_user(&self, id: u64) -> Result<(), String> {
+        let pool = &*DB_POOL;
+        sqlx::query(&format!("DELETE FROM {} WHERE id = ?", USER_TABLE_NAME))
+            .bind(id)
+            .execute(pool)
+            .await
+            .map_err(|e| format!("Database error: {}", e))?;
+        Ok(())
     }
 
-    #[allow(dead_code)]
-    fn get_user_by_username<'life0,'async_trait>(&'life0 self,username:String) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = Result<User,String> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
-        todo!()
+    async fn get_user_by_username(&self, username: String) -> Result<User, String> {
+        let pool = &*DB_POOL;
+        let user = sqlx::query_as::<_, User>(&format!("SELECT id, tenant_id, username, phone, email, password FROM {} WHERE username = ?", USER_TABLE_NAME))
+            .bind(&username)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| format!("Database error: {}", e))?;
+        Ok(user)
     }
 
-    #[allow(dead_code)]
-    fn get_user_by_phone<'life0,'async_trait>(&'life0 self,phone:String) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = Result<User,String> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
-        todo!()
+    async fn get_user_by_phone(&self, phone: String) -> Result<User, String> {
+        let pool = &*DB_POOL;
+        let user = sqlx::query_as::<_, User>(&format!("SELECT id, tenant_id, username, phone, email, password FROM {} WHERE phone = ?", USER_TABLE_NAME))
+            .bind(&phone)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| format!("Database error: {}", e))?;
+        Ok(user)
     }
 
-    #[allow(dead_code)]
-    fn get_user_by_email<'life0,'async_trait>(&'life0 self,email:String) ->  ::core::pin::Pin<Box<dyn ::core::future::Future<Output = Result<User,String> > + ::core::marker::Send+'async_trait> >where 'life0:'async_trait,Self:'async_trait {
-        todo!()
+    async fn get_user_by_email(&self, email: String) -> Result<User, String> {
+        let pool = &*DB_POOL;
+        let user = sqlx::query_as::<_, User>(&format!("SELECT id, tenant_id, username, phone, email, password FROM {} WHERE email = ?", USER_TABLE_NAME))
+            .bind(&email)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| format!("Database error: {}", e))?;
+        Ok(user)
     }
 }
 
-pub async fn user_profile() -> impl IntoResponse {
-    "profile"
+pub async fn user_profile(
+    Extension(user_provider): Extension<Arc<dyn UserProvider>>,
+    TypedHeader(uid): TypedHeader<UidHeader>,
+) -> impl IntoResponse {
+    let id: u64 = match uid.0.parse() {
+        Ok(v) => v,
+        Err(_) => return (StatusCode::BAD_REQUEST, Json(R::<ProfileInfo>::error(400, "invalid uid".into()))),
+    };
+    match user_provider.get_user_profile(id).await {
+        Ok(user) => (StatusCode::OK, Json(R::ok_data(user))),
+        Err(e) => (StatusCode::NOT_FOUND, Json(R::<ProfileInfo>::error(404, e))),
+    }
 }

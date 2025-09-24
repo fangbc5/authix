@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 
 pub mod jwt;
 pub mod uuid;
+pub mod database;
+pub mod redis;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {

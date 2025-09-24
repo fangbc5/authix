@@ -1,9 +1,10 @@
 use std::{collections::HashMap, sync::Arc};
 
 use axum::{async_trait, http::{HeaderMap, StatusCode}, Extension, Json, response::IntoResponse};
+use axum_extra::TypedHeader;
 use serde::{Deserialize, Serialize};
 
-use crate::{common::R, errors::{AuthixError, AuthixResult}, provider::{EmailLoginProvider, PasswordLoginProvider, SmsLoginProvider}, utils::jwt};
+use crate::{common::{UidHeader, R}, errors::{AuthixError, AuthixResult}, provider::{EmailLoginProvider, PasswordLoginProvider, SmsLoginProvider}, user::UserProvider, utils::jwt};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct LoginRequest {
@@ -40,7 +41,7 @@ impl From<String> for LoginType {
 
 #[async_trait]
 pub trait LoginProvider: Send + Sync {
-    async fn login(&self, req: &LoginRequest) -> AuthixResult<R<LoginResponse>>;
+    async fn login(&self, req: &LoginRequest, user_service: Arc<dyn UserProvider>) -> AuthixResult<R<LoginResponse>>;
 }
 
 /// 登录服务，负责调度不同 Provider
@@ -48,18 +49,21 @@ pub struct LoginService {
     providers: HashMap<LoginType, Box<dyn LoginProvider>>,
 }
 
-impl LoginService {
-    pub fn new() -> Self {
+impl Default for LoginService {
+    fn default() -> Self {
         let mut providers: HashMap<LoginType, Box<dyn LoginProvider>> = HashMap::new();
         providers.insert(LoginType::Password, Box::new(PasswordLoginProvider));
         providers.insert(LoginType::Sms, Box::new(SmsLoginProvider));
         providers.insert(LoginType::Email, Box::new(EmailLoginProvider));
         Self { providers }
     }
+}
 
-    pub async fn login(&self, req: LoginRequest) -> AuthixResult<R<LoginResponse>> {
+#[async_trait]
+impl LoginProvider for LoginService {
+    async fn login(&self, req: &LoginRequest, user_service: Arc<dyn UserProvider>) -> AuthixResult<R<LoginResponse>> {
         if let Some(provider) = self.providers.get(&LoginType::from(req.login_type.clone())) {
-            provider.login(&req).await
+            provider.login(&req, user_service).await
         } else {
             Err(AuthixError::UnknowLoginType(format!("未知的登录方式: {}", req.login_type.clone())))
         }
@@ -67,10 +71,11 @@ impl LoginService {
 }
 
 pub async fn login_handler(
-    Extension(service): Extension<Arc<LoginService>>,
+    Extension(login): Extension<Arc<dyn LoginProvider>>,
+    Extension(user): Extension<Arc<dyn UserProvider>>,
     Json(payload): Json<LoginRequest>,
 ) -> impl IntoResponse {
-    match service.login(payload).await {
+    match login.login(&payload, user).await {
         Ok(result) => (StatusCode::OK, Json(result)),
         Err(e) => (StatusCode::UNAUTHORIZED, Json(R::<LoginResponse>::error(401, e.to_string()))),
     }
@@ -95,4 +100,8 @@ pub async fn refresh_token(headers: HeaderMap) -> impl IntoResponse {
         },
         Err(_) => unauthorized(),
     }
+}
+
+pub async fn logout_handler(TypedHeader(uid): TypedHeader<UidHeader>) -> impl IntoResponse {
+    Json(R::<String>::ok())
 }

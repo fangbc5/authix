@@ -1,4 +1,6 @@
+use headers::Header;
 use serde::Serialize;
+use axum::http::{HeaderName, HeaderValue};
 
 #[derive(Debug, Serialize)]
 pub struct R<T> {
@@ -54,5 +56,56 @@ impl<T> R<T> {
             message: Some(msg),
             data: None
         }
+    }
+}
+
+pub struct TenantIdHeader(pub String);
+pub struct UidHeader(pub String);
+
+impl Header for TenantIdHeader {
+    fn name() -> &'static HeaderName {
+        static NAME: HeaderName = HeaderName::from_static("tenant_id");
+        &NAME
+    }
+
+    fn decode<'i, I>(values: &mut I) -> Result<Self, headers::Error>
+    where
+        I: Iterator<Item = &'i HeaderValue>,
+    {
+        if let Some(value) = values.next() {
+            return value
+                .to_str()
+                .map(|s| TenantIdHeader(s.to_string()))
+                .map_err(|_| headers::Error::invalid());
+        }
+        Err(headers::Error::invalid())
+    }
+
+    fn encode<E: Extend<HeaderValue>>(&self, values: &mut E) {
+        values.extend(std::iter::once(HeaderValue::from_str(&self.0).unwrap()));
+    }
+}
+
+impl Header for UidHeader {
+    fn name() -> &'static HeaderName {
+        static NAME: HeaderName = HeaderName::from_static("uid");
+        &NAME
+    }
+
+    fn decode<'i, I>(values: &mut I) -> Result<Self, headers::Error>
+    where
+        I: Iterator<Item = &'i HeaderValue>,
+    {
+        if let Some(value) = values.next() {
+            return value
+                .to_str()
+                .map(|s| UidHeader(s.to_string()))
+                .map_err(|_| headers::Error::invalid());
+        }
+        Err(headers::Error::invalid())
+    }
+
+    fn encode<E: Extend<HeaderValue>>(&self, values: &mut E) {
+        values.extend(std::iter::once(HeaderValue::from_str(&self.0).unwrap()));
     }
 }
