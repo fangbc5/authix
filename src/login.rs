@@ -2,15 +2,35 @@ use std::{collections::HashMap, sync::Arc};
 
 use axum::{async_trait, http::{HeaderMap, StatusCode}, Extension, Json, response::IntoResponse};
 use axum_extra::TypedHeader;
+use deadpool_redis::redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 
-use crate::{common::{UidHeader, R}, errors::{AuthixError, AuthixResult}, provider::{EmailLoginProvider, PasswordLoginProvider, SmsLoginProvider}, user::UserProvider, utils::jwt};
+use crate::{cache::USER_CAN_REGISTER_FLAG_KEY, common::{UidHeader, R}, errors::{AuthixError, AuthixResult}, provider::{EmailLoginProvider, PasswordLoginProvider, SmsLoginProvider}, user::{User, UserProvider}, utils::{jwt, redis::REDIS_POOL}};
+use argon2::{Argon2, password_hash::{PasswordHasher, SaltString}, password_hash::rand_core::OsRng};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct LoginRequest {
     pub login_type: String,    // "password" | "sms" | "email"
     pub identifier: String,    // 用户名/手机号/邮箱
     pub credential: String,    // 密码/验证码
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RegisterRequest {
+    pub register_type: String,  // "password" | "sms" | "email"
+    pub identifier: String,     // 用户名/手机号/邮箱
+    pub credential: String,     // 密码
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct VerifyCodeRequest {
+    pub identifier: String,     // 用户名/手机号/邮箱
+    pub credential: String,     // 验证码
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SendCodeRequest {
+    pub identifier: String,     // 用户名/手机号/邮箱
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -67,6 +87,141 @@ impl LoginProvider for LoginService {
         } else {
             Err(AuthixError::UnknowLoginType(format!("未知的登录方式: {}", req.login_type.clone())))
         }
+    }
+}
+
+pub async fn register_handler(
+    Extension(_login): Extension<Arc<dyn LoginProvider>>, // _login is unused here
+    Extension(user): Extension<Arc<dyn UserProvider>>,
+    Json(payload): Json<RegisterRequest>,
+) -> impl IntoResponse {
+    // 使用 argon2 加密密码
+    let argon2 = Argon2::default();
+    let password_hash = match argon2.hash_password(payload.credential.as_bytes(), &SaltString::generate(&mut OsRng)) {
+        Ok(h) => h.to_string(),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(R::<u64>::error(500, format!("hash password error: {}", e)))),
+    };
+
+    match payload.register_type.as_str() {
+        "password" => {
+            // 检查用户名是否已存在
+            if user.get_user_by_username(payload.identifier.clone()).await.is_ok() {
+                return (StatusCode::CONFLICT, Json(R::<u64>::error(409, "username already exists".into())));
+            }
+            
+            let new_user = User {
+                id: 0,
+                tenant_id: 0, // 默认租户ID为0
+                username: Some(payload.identifier.clone()),
+                phone: None,
+                email: None,
+                password: password_hash,
+                crt_by: Some(payload.identifier.clone()),
+            };
+            
+            match user.create_user(new_user).await {
+                Ok(u) => (StatusCode::OK, Json(R::ok_data(u.id))),
+                Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(R::<u64>::error(500, e))),
+            }
+        }
+        "sms" => {
+            // 检查手机号是否已存在
+            if user.get_user_by_phone(payload.identifier.clone()).await.is_ok() {
+                return (StatusCode::CONFLICT, Json(R::<u64>::error(409, "phone already exists".into())));
+            }
+            
+            // 检查是否验证过验证码（5分钟内）
+            let mut conn = match REDIS_POOL.get().await {
+                Ok(conn) => conn,
+                Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(R::<u64>::error(500, format!("redis get conn error: {}", e)))),
+            };
+            
+            let register_flag_key = format!("{}:{}", USER_CAN_REGISTER_FLAG_KEY, payload.identifier);
+            let can_register: Option<String> = match conn.get(&register_flag_key).await {
+                Ok(flag) => flag,
+                Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(R::<u64>::error(500, format!("redis get error: {}", e)))),
+            };
+            
+            if can_register.is_none() {
+                return (StatusCode::BAD_REQUEST, Json(R::<u64>::error(400, "验证码已失效,请重新获取验证码".into())));
+            }
+            
+            let new_user = User {
+                id: 0,
+                tenant_id: 0,
+                username: None,
+                phone: Some(payload.identifier.clone()),
+                email: None,
+                password: password_hash,
+                crt_by: Some(payload.identifier.clone()),
+            };
+            
+            match user.create_user(new_user).await {
+                Ok(u) => {
+                    // 注册成功后清除注册验证标识
+                    let _: () = conn.del(&register_flag_key).await.unwrap_or_default();
+                    (StatusCode::OK, Json(R::ok_data(u.id)))
+                },
+                Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(R::<u64>::error(500, e))),
+            }
+        }
+        "email" => {
+            // 检查邮箱是否已存在
+            if user.get_user_by_email(payload.identifier.clone()).await.is_ok() {
+                return (StatusCode::CONFLICT, Json(R::<u64>::error(409, "email already exists".into())));
+            }
+            
+            // 检查是否验证过验证码（5分钟内）
+            let mut conn = match REDIS_POOL.get().await {
+                Ok(conn) => conn,
+                Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(R::<u64>::error(500, format!("redis get conn error: {}", e)))),
+            };
+            
+            let register_flag_key = format!("{}:{}", USER_CAN_REGISTER_FLAG_KEY, payload.identifier);
+            let can_register: Option<String> = match conn.get(&register_flag_key).await {
+                Ok(flag) => flag,
+                Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(R::<u64>::error(500, format!("redis get error: {}", e)))),
+            };
+            
+            if can_register.is_none() {
+                return (StatusCode::BAD_REQUEST, Json(R::<u64>::error(400, "验证码已失效,请重新获取验证码".into())));
+            }
+            
+            let new_user = User {
+                id: 0,
+                tenant_id: 0,
+                username: None,
+                phone: None,
+                email: Some(payload.identifier.clone()),
+                password: password_hash,
+                crt_by: Some(payload.identifier.clone()),
+            };
+            
+            match user.create_user(new_user).await {
+                Ok(u) => {
+                    // 注册成功后清除注册验证标识
+                    let _: () = conn.del(&register_flag_key).await.unwrap_or_default();
+                    (StatusCode::OK, Json(R::ok_data(u.id)))
+                },
+                Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(R::<u64>::error(500, e))),
+            }
+        }
+        _ => (StatusCode::BAD_REQUEST, Json(R::<u64>::error(400, "unsupported register type".into()))),
+    }
+}
+
+pub async fn send_code(Json(payload): Json<SendCodeRequest>) -> impl IntoResponse {
+    match crate::cache::save_verify_code(&payload.identifier).await {
+        Ok(code) => (StatusCode::OK, Json(R::<String>::ok_data(code))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(R::<String>::error(500, e))),
+    }
+}
+
+pub async fn verify_code(Json(payload): Json<VerifyCodeRequest>) -> impl IntoResponse {
+    match crate::cache::verify_code(&payload.identifier, &payload.credential).await {
+        Ok(true) => (StatusCode::OK, Json(R::<String>::ok())),
+        Ok(false) => (StatusCode::UNAUTHORIZED, Json(R::<String>::error(401, "invalid verification code".into()))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(R::<String>::error(500, e))),
     }
 }
 

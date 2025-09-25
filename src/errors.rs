@@ -14,6 +14,12 @@ pub enum AuthixError {
     #[error("Invalid credentials for {0}")]
     InvalidCredentials(String),
 
+    #[error("User not found: {0}")]
+    UserNotFound(String),
+
+    #[error("Database error: {0}")]
+    DatabaseError(String),
+
     #[error("Redis error for {0}")]
     RedisError(#[from] redis::RedisError),
 

@@ -7,6 +7,7 @@ use crate::{common::{TenantIdHeader, UidHeader}, utils::redis::REDIS_POOL};
 
 const ONE_TIME_TOKEN_KEY: &str = "one_time_token";
 
+/// 生成token
 pub async fn get_token(
     TypedHeader(tenant_id): TypedHeader<TenantIdHeader>,
     TypedHeader(uid): TypedHeader<UidHeader>,
@@ -18,4 +19,11 @@ pub async fn get_token(
     let _: () = conn.set_ex(&key, "1", 60 * 5).await.unwrap();
 
     token
+}
+
+/// 生成6位数字验证码
+pub fn generate_verify_code() -> String {
+    use rand::Rng;
+    let mut rng = rand::rng();
+    format!("{:06}", rng.random_range(100000..=999999))
 }

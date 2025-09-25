@@ -2,9 +2,8 @@ use std::sync::Arc;
 
 use axum::async_trait;
 use argon2::{Argon2, password_hash::{PasswordHash, PasswordVerifier}};
-use deadpool_redis::redis::AsyncCommands;
 
-use crate::{common::R, errors::{AuthixError, AuthixResult}, login::{LoginProvider, LoginRequest, LoginResponse}, user::UserProvider, utils::{jwt, redis::REDIS_POOL}};
+use crate::{common::R, errors::{AuthixError, AuthixResult}, login::{LoginProvider, LoginRequest, LoginResponse}, user::UserProvider, utils::jwt};
 
 pub struct PasswordLoginProvider;
 
@@ -26,7 +25,11 @@ impl LoginProvider for PasswordLoginProvider {
         }
 
         // 使用用户 id 作为 sub 生成 token
-        let resp = jwt::create_token(user.id.to_string(), "default".to_string()).await?;
+        let resp = jwt::create_token(user.id.to_string(), "0".to_string()).await?;
+        
+        // 更新用户最后登录时间
+        user_service.update_last_login_time(user.id).await?;
+        
         Ok(R::ok_data(resp))
     }
 }

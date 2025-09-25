@@ -5,7 +5,7 @@ use dotenvy::dotenv;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
-use crate::login::{login_handler, logout_handler, refresh_token, LoginProvider, LoginService};
+use crate::{login::{login_handler, logout_handler, refresh_token, register_handler, send_code, verify_code, LoginProvider, LoginService}, user::delete_user};
 use crate::user::{online_count, user_profile, online_users, UserService, UserProvider};
 use crate::utils::uuid::get_token;
 
@@ -44,6 +44,9 @@ pub async fn init_app() -> Router {
     let login_service = Arc::new(LoginService::default());
     let user_service = Arc::new(UserService::default());
     let auth_router = Router::new()
+        .route("/register", post(register_handler))
+        .route("/code/verify", post(verify_code))
+        .route("/code/send", post(send_code))
         .route("/login", post(login_handler))
         .route("/logout", get(logout_handler));
     let token_router = Router::new()
@@ -52,7 +55,8 @@ pub async fn init_app() -> Router {
     let user_router =  Router::new()
         .route("/online_count", get(online_count))
         .route("/online_users", get(online_users))
-        .route("/profile", get(user_profile));
+        .route("/profile", get(user_profile))
+        .route("/delete", get(delete_user));
 
     Router::new()
     .nest("/auth", auth_router)

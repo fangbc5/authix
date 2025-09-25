@@ -9,6 +9,7 @@ use sqlx::FromRow;
 use crate::cache::get_online_user_count;
 use crate::common::PageQuery;
 use crate::common::PageResult;
+use crate::errors::AuthixResult;
 use crate::utils::database::DB_POOL;
 use axum::http::StatusCode;
 use axum::Json;
@@ -28,6 +29,8 @@ pub struct User {
     pub phone: Option<String>,
     pub email: Option<String>,
     pub password: String,
+    #[serde(skip)]
+    pub crt_by: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, FromRow)]
@@ -49,6 +52,7 @@ pub trait UserProvider: Send + Sync {
     async fn get_user_by_username(&self, username: String) -> Result<User, String>;
     async fn get_user_by_phone(&self, phone: String) -> Result<User, String>;
     async fn get_user_by_email(&self, email: String) -> Result<User, String>;
+    async fn update_last_login_time(&self, id: u64) -> AuthixResult<User>;
 }
 
 #[derive(Default)]
@@ -90,12 +94,13 @@ impl UserProvider for UserService {
 
     async fn create_user(&self, user: User) -> Result<User, String> {
         let pool = &*DB_POOL;
-        let result = sqlx::query(&format!("INSERT INTO {} (tenant_id, username, phone, email, password) VALUES (?, ?, ?, ?, ?)", USER_TABLE_NAME))
+        let result = sqlx::query(&format!("INSERT INTO {} (tenant_id, username, phone, email, password, crt_by) VALUES (?, ?, ?, ?, ?, ?)", USER_TABLE_NAME))
             .bind(&user.tenant_id)
             .bind(&user.username)
             .bind(&user.phone)
             .bind(&user.email)
             .bind(&user.password)
+            .bind(&user.crt_by)
             .execute(pool)
             .await
             .map_err(|e| format!("Database error: {}", e))?;
@@ -107,6 +112,7 @@ impl UserProvider for UserService {
             phone: user.phone,
             email: user.email,
             password: user.password,
+            crt_by: None,
         };
         Ok(new_user)
     }
@@ -150,6 +156,30 @@ impl UserProvider for UserService {
             .map_err(|e| format!("Database error: {}", e))?;
         Ok(user)
     }
+
+    async fn update_last_login_time(&self, id: u64) -> AuthixResult<User> {
+        let pool = &*DB_POOL;
+        
+        // 使用 NOW() 函数获取当前服务器时间
+        let result = sqlx::query(&format!("UPDATE {} SET last_login = NOW() WHERE id = ?", USER_TABLE_NAME))
+            .bind(id)
+            .execute(pool)
+            .await
+            .map_err(|e| crate::errors::AuthixError::DatabaseError(format!("Database error: {}", e)))?;
+        
+        if result.rows_affected() == 0 {
+            return Err(crate::errors::AuthixError::UserNotFound(format!("User with id {} not found", id)));
+        }
+        
+        // 查询更新后的用户信息
+        let user = sqlx::query_as::<_, User>(&format!("SELECT id, tenant_id, username, phone, email, password FROM {} WHERE id = ?", USER_TABLE_NAME))
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| crate::errors::AuthixError::DatabaseError(format!("Database error: {}", e)))?;
+        
+        Ok(user)
+    }
 }
 
 pub async fn user_profile(
@@ -190,5 +220,19 @@ pub async fn online_users(
             }
         }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(R::<PageResult<ProfileInfo>>::error(500, e))),
+    }
+}
+
+pub async fn delete_user(Extension(
+    user_provider): Extension<Arc<dyn UserProvider>>,
+    TypedHeader(uid): TypedHeader<UidHeader>
+) -> impl IntoResponse {
+    let id: u64 = match uid.0.parse() {
+        Ok(v) => v,
+        Err(_) => return (StatusCode::BAD_REQUEST, Json(R::<String>::error(400, "invalid uid".into()))),
+    };
+    match user_provider.delete_user(id).await {
+        Ok(_) => (StatusCode::OK, Json(R::<String>::ok())),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(R::<String>::error(500, e))),
     }
 }

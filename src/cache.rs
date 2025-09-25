@@ -2,10 +2,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use deadpool_redis::redis::AsyncCommands;
 
-use crate::{common::PageResult, utils::redis::REDIS_POOL};
+use crate::{common::PageResult, utils::{self, redis::REDIS_POOL}};
 
 const TOKEN_CACHE_KEY: &str = "user:session:token";
 const ONLINE_USERS_KEY: &str = "user:online";
+const VERIFY_CODE_KEY: &str = "user:verify:code";
+pub const USER_CAN_REGISTER_FLAG_KEY: &str = "user:register:flag";
+/// 验证码有效时长
+const VERIFY_CODE_SEC_TTL: u64 = 300;
 
 
 
@@ -129,3 +133,51 @@ pub async fn get_online_user_ids_paginated(
 
     Ok(PageResult { total, records: ids })
 }
+
+/// 保存验证码到 Redis，过期时间 5 分钟
+pub async fn save_verify_code(identifier: &str) -> Result<String, String> {
+    let mut conn = REDIS_POOL
+        .get()
+        .await
+        .map_err(|e| format!("redis get conn error: {}", e))?;
+    
+    let key = format!("{}:{}", VERIFY_CODE_KEY, identifier);
+    let code = utils::uuid::generate_verify_code();
+    let _: () = conn
+        .set_ex(&key, &code, VERIFY_CODE_SEC_TTL) // 5分钟过期
+        .await
+        .map_err(|e| format!("redis set_ex error: {}", e))?;
+    
+    Ok(code)
+}
+
+/// 校验验证码
+pub async fn verify_code(identifier: &str, code: &str) -> Result<bool, String> {
+    let mut conn = REDIS_POOL
+        .get()
+        .await
+        .map_err(|e| format!("redis get conn error: {}", e))?;
+    
+    let key = format!("{}:{}", VERIFY_CODE_KEY, identifier);
+    let stored_code: Option<String> = conn
+        .get(&key)
+        .await
+        .map_err(|e| format!("redis get error: {}", e))?;
+    
+    match stored_code {
+        Some(stored) => {
+            if stored == code {
+                // 验证成功后删除验证码
+                let _: () = conn.del(&key).await.map_err(|e| format!("redis del error: {}", e))?;
+                let _: () = conn.set_ex(format!("{}:{}",USER_CAN_REGISTER_FLAG_KEY,identifier), 1, VERIFY_CODE_SEC_TTL)
+                                .await
+                                .map_err(|e| format!("set user can register flag error: {}", e))?;
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        }
+        None => Ok(false),
+    }
+}
+

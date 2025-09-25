@@ -13,7 +13,11 @@ impl LoginProvider for SmsLoginProvider {
             .get_user_by_phone(req.identifier.clone())
             .await
             .map_err(|_| AuthixError::InvalidCredentials("手机号未注册".to_owned()))?;
-        let resp = crate::utils::jwt::create_token(user.id.to_string(), "default".to_string()).await?;
+        
+        let resp = crate::utils::jwt::create_token(user.id.to_string(), "0".to_string()).await?;
+
+        // 更新用户最后登录时间
+        user_service.update_last_login_time(user.id).await?;
         Ok(R::ok_data(resp))
     }
 }

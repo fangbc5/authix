@@ -40,6 +40,7 @@ prometheus = "0.14.0"
 
 # uuid
 uuid = { version = "1.18.1", features = ["v4"] }
+rand = "0.9"
 
 # 数据库
 sqlx = { version = "0.7", features = ["runtime-tokio", "tls-native-tls", "mysql", "chrono"] }
