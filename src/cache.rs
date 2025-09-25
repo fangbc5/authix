@@ -2,7 +2,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use deadpool_redis::redis::AsyncCommands;
 
-use crate::{common::PageResult, utils::{self, redis::REDIS_POOL}};
+use crate::{common::PageResult, enums::AuthEnum, utils::{self, redis::REDIS_POOL}};
 
 const TOKEN_CACHE_KEY: &str = "user:session:token";
 const ONLINE_USERS_KEY: &str = "user:online";
@@ -152,7 +152,7 @@ pub async fn save_verify_code(identifier: &str) -> Result<String, String> {
 }
 
 /// 校验验证码
-pub async fn verify_code(identifier: &str, code: &str) -> Result<bool, String> {
+pub async fn verify_code(identifier: &str, code: &str, scene: AuthEnum) -> Result<bool, String> {
     let mut conn = REDIS_POOL
         .get()
         .await
@@ -169,9 +169,14 @@ pub async fn verify_code(identifier: &str, code: &str) -> Result<bool, String> {
             if stored == code {
                 // 验证成功后删除验证码
                 let _: () = conn.del(&key).await.map_err(|e| format!("redis del error: {}", e))?;
-                let _: () = conn.set_ex(format!("{}:{}",USER_CAN_REGISTER_FLAG_KEY,identifier), 1, VERIFY_CODE_SEC_TTL)
+                match scene {
+                    AuthEnum::Login => {}
+                    AuthEnum::Register => {
+                        let _: () = conn.set_ex(format!("{}:{}",USER_CAN_REGISTER_FLAG_KEY,identifier), 1, VERIFY_CODE_SEC_TTL)
                                 .await
                                 .map_err(|e| format!("set user can register flag error: {}", e))?;
+                    }
+                }
                 Ok(true)
             } else {
                 Ok(false)

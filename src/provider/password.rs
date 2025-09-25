@@ -11,10 +11,12 @@ pub struct PasswordLoginProvider;
 impl LoginProvider for PasswordLoginProvider {
     async fn login(&self, req: &LoginRequest, user_service: Arc<dyn UserProvider>) -> AuthixResult<R<LoginResponse>> {
         // 通过用户名加载用户
-        let user = user_service
+        let user = match user_service
             .get_user_by_username(req.identifier.clone())
-            .await
-            .map_err(|e| AuthixError::InvalidCredentials(format!("查询用户错误, {}", e)))?;
+            .await? {
+                Some(u) => u,
+                None => return Err(AuthixError::InvalidCredentials("用户名或密码错误".into())),
+            };
 
         // 使用 argon2 校验密码（user.password 应存储为 PHC 字符串）
         let parsed_hash = PasswordHash::new(&user.password)
@@ -26,10 +28,10 @@ impl LoginProvider for PasswordLoginProvider {
 
         // 使用用户 id 作为 sub 生成 token
         let resp = jwt::create_token(user.id.to_string(), "0".to_string()).await?;
-        
-        // 更新用户最后登录时间
-        user_service.update_last_login_time(user.id).await?;
-        
+
+        // 更新最后登录时间
+        let _ = user_service.update_last_login_time(user.id).await?;
+
         Ok(R::ok_data(resp))
     }
 }

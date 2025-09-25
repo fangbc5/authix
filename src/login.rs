@@ -5,7 +5,7 @@ use axum_extra::TypedHeader;
 use deadpool_redis::redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 
-use crate::{cache::USER_CAN_REGISTER_FLAG_KEY, common::{UidHeader, R}, errors::{AuthixError, AuthixResult}, provider::{EmailLoginProvider, PasswordLoginProvider, SmsLoginProvider}, user::{User, UserProvider}, utils::{jwt, redis::REDIS_POOL}};
+use crate::{cache::USER_CAN_REGISTER_FLAG_KEY, common::{UidHeader, R}, enums::AuthEnum, errors::{AuthixError, AuthixResult}, provider::{EmailLoginProvider, PasswordLoginProvider, SmsLoginProvider}, user::{User, UserProvider}, utils::{jwt, redis::REDIS_POOL}};
 use argon2::{Argon2, password_hash::{PasswordHasher, SaltString}, password_hash::rand_core::OsRng};
 
 #[derive(Debug, Clone, Deserialize)]
@@ -26,6 +26,7 @@ pub struct RegisterRequest {
 pub struct VerifyCodeRequest {
     pub identifier: String,     // 用户名/手机号/邮箱
     pub credential: String,     // 验证码
+    pub verify_type: AuthEnum,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -105,8 +106,14 @@ pub async fn register_handler(
     match payload.register_type.as_str() {
         "password" => {
             // 检查用户名是否已存在
-            if user.get_user_by_username(payload.identifier.clone()).await.is_ok() {
-                return (StatusCode::CONFLICT, Json(R::<u64>::error(409, "username already exists".into())));
+            match user.get_user_by_username(payload.identifier.clone()).await {
+                Ok(Some(_)) => {
+                    return (StatusCode::CONFLICT, Json(R::<u64>::error(409, "username already exists".into())));
+                }
+                Ok(None) => { /* continue */ }
+                Err(e) => {
+                    return (StatusCode::INTERNAL_SERVER_ERROR, Json(R::<u64>::error(500, e.to_string())));
+                }
             }
             
             let new_user = User {
@@ -126,8 +133,14 @@ pub async fn register_handler(
         }
         "sms" => {
             // 检查手机号是否已存在
-            if user.get_user_by_phone(payload.identifier.clone()).await.is_ok() {
-                return (StatusCode::CONFLICT, Json(R::<u64>::error(409, "phone already exists".into())));
+            match user.get_user_by_phone(payload.identifier.clone()).await {
+                Ok(Some(_)) => {
+                    return (StatusCode::CONFLICT, Json(R::<u64>::error(409, "phone already exists".into())));
+                }
+                Ok(None) => { /* continue */ }
+                Err(e) => {
+                    return (StatusCode::INTERNAL_SERVER_ERROR, Json(R::<u64>::error(500, e.to_string())));
+                }
             }
             
             // 检查是否验证过验证码（5分钟内）
@@ -167,8 +180,14 @@ pub async fn register_handler(
         }
         "email" => {
             // 检查邮箱是否已存在
-            if user.get_user_by_email(payload.identifier.clone()).await.is_ok() {
-                return (StatusCode::CONFLICT, Json(R::<u64>::error(409, "email already exists".into())));
+            match user.get_user_by_email(payload.identifier.clone()).await {
+                Ok(Some(_)) => {
+                    return (StatusCode::CONFLICT, Json(R::<u64>::error(409, "email already exists".into())));
+                }
+                Ok(None) => { /* continue */ }
+                Err(e) => {
+                    return (StatusCode::INTERNAL_SERVER_ERROR, Json(R::<u64>::error(500, e.to_string())));
+                }
             }
             
             // 检查是否验证过验证码（5分钟内）
@@ -218,7 +237,7 @@ pub async fn send_code(Json(payload): Json<SendCodeRequest>) -> impl IntoRespons
 }
 
 pub async fn verify_code(Json(payload): Json<VerifyCodeRequest>) -> impl IntoResponse {
-    match crate::cache::verify_code(&payload.identifier, &payload.credential).await {
+    match crate::cache::verify_code(&payload.identifier, &payload.credential, payload.verify_type).await {
         Ok(true) => (StatusCode::OK, Json(R::<String>::ok())),
         Ok(false) => (StatusCode::UNAUTHORIZED, Json(R::<String>::error(401, "invalid verification code".into()))),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(R::<String>::error(500, e))),

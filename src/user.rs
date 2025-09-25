@@ -30,6 +30,7 @@ pub struct User {
     pub email: Option<String>,
     pub password: String,
     #[serde(skip)]
+    #[sqlx(skip)]
     pub crt_by: Option<String>,
 }
 
@@ -49,9 +50,9 @@ pub trait UserProvider: Send + Sync {
     async fn get_user_profiles(&self, ids: Vec<u64>) -> Result<Vec<ProfileInfo>, String>;
     async fn create_user(&self, user: User) -> Result<User, String>;
     async fn delete_user(&self, id: u64) -> Result<(), String>;
-    async fn get_user_by_username(&self, username: String) -> Result<User, String>;
-    async fn get_user_by_phone(&self, phone: String) -> Result<User, String>;
-    async fn get_user_by_email(&self, email: String) -> Result<User, String>;
+    async fn get_user_by_username(&self, username: String) -> AuthixResult<Option<User>>;
+    async fn get_user_by_phone(&self, phone: String) -> AuthixResult<Option<User>>;
+    async fn get_user_by_email(&self, email: String) -> AuthixResult<Option<User>>;
     async fn update_last_login_time(&self, id: u64) -> AuthixResult<User>;
 }
 
@@ -127,33 +128,30 @@ impl UserProvider for UserService {
         Ok(())
     }
 
-    async fn get_user_by_username(&self, username: String) -> Result<User, String> {
+    async fn get_user_by_username(&self, username: String) -> AuthixResult<Option<User>> {
         let pool = &*DB_POOL;
         let user = sqlx::query_as::<_, User>(&format!("SELECT id, tenant_id, username, phone, email, password FROM {} WHERE username = ?", USER_TABLE_NAME))
             .bind(&username)
-            .fetch_one(pool)
-            .await
-            .map_err(|e| format!("Database error: {}", e))?;
+            .fetch_optional(pool)
+            .await?;
         Ok(user)
     }
 
-    async fn get_user_by_phone(&self, phone: String) -> Result<User, String> {
+    async fn get_user_by_phone(&self, phone: String) -> AuthixResult<Option<User>> {
         let pool = &*DB_POOL;
         let user = sqlx::query_as::<_, User>(&format!("SELECT id, tenant_id, username, phone, email, password FROM {} WHERE phone = ?", USER_TABLE_NAME))
             .bind(&phone)
-            .fetch_one(pool)
-            .await
-            .map_err(|e| format!("Database error: {}", e))?;
+            .fetch_optional(pool)
+            .await?;
         Ok(user)
     }
 
-    async fn get_user_by_email(&self, email: String) -> Result<User, String> {
+    async fn get_user_by_email(&self, email: String) -> AuthixResult<Option<User>> {
         let pool = &*DB_POOL;
         let user = sqlx::query_as::<_, User>(&format!("SELECT id, tenant_id, username, phone, email, password FROM {} WHERE email = ?", USER_TABLE_NAME))
             .bind(&email)
-            .fetch_one(pool)
-            .await
-            .map_err(|e| format!("Database error: {}", e))?;
+            .fetch_optional(pool)
+            .await?;
         Ok(user)
     }
 

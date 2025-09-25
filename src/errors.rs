@@ -20,6 +20,9 @@ pub enum AuthixError {
     #[error("Database error: {0}")]
     DatabaseError(String),
 
+    #[error("SQLx error: {0}")]
+    SqlxError(#[from] sqlx::Error),
+
     #[error("Redis error for {0}")]
     RedisError(#[from] redis::RedisError),
 

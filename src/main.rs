@@ -16,6 +16,7 @@ mod user;
 mod utils;
 mod errors;
 mod cache;
+mod enums;
 
 #[tokio::main]
 async fn main() {
