@@ -51,3 +51,4 @@ deadpool-redis = "0.22.0"
 
 # 时间日期
 chrono = { version = "0.4", features = ["serde"]}
+regex = "1"

@@ -11,6 +11,9 @@ pub enum AuthixError {
     #[error("Unknown login type: {0}")]
     UnknowLoginType(String),
 
+    #[error("Unknown register type: {0}")]
+    UnknowRegisterType(String),
+
     #[error("Invalid credentials for {0}")]
     InvalidCredentials(String),
 

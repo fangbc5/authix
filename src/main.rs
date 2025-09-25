@@ -5,12 +5,12 @@ use dotenvy::dotenv;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
-use crate::{login::{login_handler, logout_handler, refresh_token, register_handler, send_code, verify_code, LoginProvider, LoginService}, user::delete_user};
+use crate::{auth_handler::{login_handler, logout_handler, refresh_token, register_handler, send_code, verify_code}, provider::{login::{LoginProvider, LoginService}, register::{RegisterProvider, RegisterService}}, user::delete_user};
 use crate::user::{online_count, user_profile, online_users, UserService, UserProvider};
 use crate::utils::uuid::get_token;
 
 mod common;
-mod login;
+mod auth_handler;
 mod provider;
 mod user;
 mod utils;
@@ -43,6 +43,7 @@ pub async fn init_logger() {
 
 pub async fn init_app() -> Router {
     let login_service = Arc::new(LoginService::default());
+    let register_service = Arc::new(RegisterService::default());
     let user_service = Arc::new(UserService::default());
     let auth_router = Router::new()
         .route("/register", post(register_handler))
@@ -64,5 +65,6 @@ pub async fn init_app() -> Router {
     .nest("/token", token_router)
     .nest("/user", user_router)
     .layer(axum::Extension(login_service as Arc<dyn LoginProvider>))
+    .layer(axum::Extension(register_service as Arc<dyn RegisterProvider>))
     .layer(axum::Extension(user_service as Arc<dyn UserProvider>))
 }

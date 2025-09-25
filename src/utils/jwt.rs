@@ -1,6 +1,6 @@
 use std::{env, time::{Duration, SystemTime, UNIX_EPOCH}};
 use jsonwebtoken::{encode, decode, Algorithm, EncodingKey, DecodingKey, Header, Validation};
-use crate::{cache, errors::{AuthixError, AuthixResult}, login::LoginResponse, utils::Claims};
+use crate::{cache, errors::{AuthixError, AuthixResult}, provider::login::LoginResponse, utils::Claims};
 
 pub const ACCESS_TOKEN_EXP: usize = 1000 * 60 * 5;
 pub const REFRESH_TOKEN_EXP: usize = 1000 * 60 * 60 * 24 * 7;

@@ -4,6 +4,7 @@ pub mod jwt;
 pub mod uuid;
 pub mod database;
 pub mod redis;
+pub mod regex;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {
