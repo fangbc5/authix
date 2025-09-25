@@ -1,8 +1,11 @@
 use std::sync::Arc;
 
 use axum::{async_trait, response::IntoResponse};
+use chrono::DateTime;
+use chrono::Local;
 use chrono::NaiveDate;
 use chrono::NaiveDateTime;
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
@@ -41,7 +44,7 @@ pub struct ProfileInfo {
     pub avatar: Option<String>,
     pub gender: Option<u8>,
     pub birthday: Option<NaiveDate>,
-    pub last_login: Option<NaiveDateTime>,
+    pub last_login: Option<DateTime<Local>>,
 }
 
 #[async_trait]
