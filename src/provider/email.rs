@@ -69,7 +69,7 @@ impl RegisterProvider for EmailRegisterProvider {
             phone: None,
             email: Some(req.identifier.clone()),
             password: password_hash,
-            crt_by: None,
+            crt_by: Some(req.identifier.clone()),
         };
         match user_service.create_user(new_user).await {
             Ok(u) => {
@@ -79,4 +79,4 @@ impl RegisterProvider for EmailRegisterProvider {
             Err(e) => Ok(R::error(500, e)),
         }
     }
-} 
+}

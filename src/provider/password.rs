@@ -65,7 +65,7 @@ impl RegisterProvider for PasswordRegisterProvider {
             phone: None,
             email: None,
             password: password_hash,
-            crt_by: None,
+            crt_by: Some(req.identifier.clone()),
         };
         match user_service.create_user(new_user).await {
             Ok(u) => Ok(R::ok_data(u.id)),
