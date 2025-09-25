@@ -4,18 +4,20 @@ use axum::{http::{HeaderMap, StatusCode}, Extension, Json, response::IntoRespons
 use axum_extra::TypedHeader;
 use serde::Deserialize;
 
-use crate::{common::{UidHeader, R}, enums::AuthEnum, provider::{login::{LoginProvider, LoginRequest, LoginResponse}, register::{RegisterProvider, RegisterRequest}}, user::UserProvider, utils::jwt};
+use crate::{common::{UidHeader, R}, enums::{AuthEnum, AuthType}, provider::{login::{LoginProvider, LoginRequest, LoginResponse}, register::{RegisterProvider, RegisterRequest}}, user::UserProvider, utils::jwt};
+use crate::utils::regex::{is_valid_email, is_valid_phone};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct VerifyCodeRequest {
     pub identifier: String,     // 用户名/手机号/邮箱
     pub credential: String,     // 验证码
-    pub verify_type: AuthEnum,
+    pub verify_type: AuthEnum,  // 验证类型sms、email
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SendCodeRequest {
     pub identifier: String,     // 用户名/手机号/邮箱
+    pub verify_type: AuthType,  // 验证类型sms、email
 }
 
 pub async fn register_handler(
@@ -37,6 +39,23 @@ pub async fn register_handler(
 }
 
 pub async fn send_code(Json(payload): Json<SendCodeRequest>) -> impl IntoResponse {
+    // 根据 verify_type 校验 identifier
+    match payload.verify_type {
+        AuthType::Sms => {
+            if !is_valid_phone(&payload.identifier) {
+                return (StatusCode::BAD_REQUEST, Json(R::<String>::error(400, "手机号格式不正确".into())));
+            }
+        }
+        AuthType::Email => {
+            if !is_valid_email(&payload.identifier) {
+                return (StatusCode::BAD_REQUEST, Json(R::<String>::error(400, "邮箱格式不正确".into())));
+            }
+        }
+        _ => {
+            return (StatusCode::BAD_REQUEST, Json(R::<String>::error(400, "不支持的验证类型".into())));
+        }
+    }
+
     match crate::cache::save_verify_code(&payload.identifier).await {
         Ok(code) => (StatusCode::OK, Json(R::<String>::ok_data(code))),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(R::<String>::error(500, e))),
