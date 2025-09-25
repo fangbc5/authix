@@ -9,7 +9,7 @@ use crate::utils::regex::{is_valid_email, is_valid_phone};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct VerifyCodeRequest {
-    pub identifier: String,     // 用户名/手机号/邮箱
+    pub identifier: String,     // 手机号/邮箱
     pub credential: String,     // 验证码
     pub verify_type: AuthEnum,  // 验证类型sms、email
 }
