@@ -52,7 +52,7 @@ cp .env.example .env
 4. 创建数据库表：
 ```sql
 -- 创建用户表
-CREATE TABLE i18n_users (
+CREATE TABLE users (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     tenant_id BIGINT NOT NULL DEFAULT 0,
     username VARCHAR(50) UNIQUE,
